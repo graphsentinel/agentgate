@@ -1,0 +1,10 @@
+apiVersion: v2
+name: agentgate
+description: Declare an agent org as code — generate, run, and govern it (E13, intra-framework)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords: [ai-agents, multi-agent, orchestration, langgraph, governance, behavior-as-code]
+home: https://github.com/graphsentinel/agentgate
+sources:
+  - https://github.com/graphsentinel/agentgate

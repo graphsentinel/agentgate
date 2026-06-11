@@ -1,0 +1,11 @@
+# The agent org as code → mounted at /etc/agentgate/org.yaml (AGENTGATE_SPEC_PATH).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-org
+  labels:
+    app.kubernetes.io/name: agentgate
+    app.kubernetes.io/instance: {{ .Release.Name }}
+data:
+  org.yaml: |
+{{ toYaml .Values.org | indent 4 }}

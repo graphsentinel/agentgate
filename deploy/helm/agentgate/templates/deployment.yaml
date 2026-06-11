@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-agentgate
+  labels:
+    app.kubernetes.io/name: agentgate
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agentgate
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agentgate
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        # roll the pod when the org ConfigMap changes (so `helm upgrade` re-reads the spec)
+        checksum/org: {{ toYaml .Values.org | sha256sum }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.securityContext.pod | nindent 8 }}
+      containers:
+        - name: agentgate
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext.container | nindent 12 }}
+          ports:
+            - { name: http, containerPort: 8000 }
+          env:
+            - { name: AGENTGATE_SPEC_PATH, value: /etc/agentgate/org.yaml }
+            - { name: AGENTGATE_DYNAMIC, value: {{ .Values.dynamic | quote }} }
+            {{- if .Values.otel.endpoint }}
+            - { name: AGENTGATE_OTLP_ENDPOINT, value: {{ .Values.otel.endpoint | quote }} }
+            {{- end }}
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - { name: org, mountPath: /etc/agentgate, readOnly: true }
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 5
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 5
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: org
+          configMap:
+            name: {{ .Release.Name }}-org

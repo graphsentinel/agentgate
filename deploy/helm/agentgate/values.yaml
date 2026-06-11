@@ -1,0 +1,72 @@
+image:
+  repository: ghcr.io/graphsentinel/agentgate
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+# false = static graph (creation-driven: edges fixed, undeclared hand-off impossible).
+# true  = dynamic graph (observability-driven: the orchestrator picks the next agent at run time
+#         and check_delegation gates it against the declared graph).
+dynamic: false
+
+service:
+  type: ClusterIP
+  port: 8000
+
+# OTLP endpoint for gen_ai.agent.* telemetry (Jaeger / Prometheus / Grafana via the OTel Collector).
+# Empty = no telemetry (just the /run trace). Point at the collector's OTLP gRPC, e.g.
+# host.k3d.internal:4317 from inside k3d, or localhost:4317 when run on the host.
+otel:
+  endpoint: ""
+
+# Extra env for the agents' LLM. AgentGate is provider-agnostic; for Ollama:
+#   - { name: AGENTGATE_LLM_PROVIDER, value: ollama }
+#   - { name: AGENTGATE_OLLAMA_HOST, value: "http://host.k3d.internal:11434" }
+# With none set, agents run in deterministic stub mode (no model needed — proves wiring).
+env: []
+
+# The agent org AS CODE — rendered into a ConfigMap and mounted at /etc/agentgate/org.yaml.
+# This IS the AgenticArchitecture (bare ASL form). Edit here, `helm upgrade`, and the org changes.
+org:
+  agents:
+    - name: planner
+      tier: strategic
+      model: ""                     # set a model id (e.g. qwen3.5:9b) + env above to go live
+      instructions: |
+        You are a planner. Break the goal into 3 short numbered steps. Output only the steps.
+      tools: []
+    - name: coder
+      model: ""
+      instructions: |
+        You are a coder. Implement step 1 as a short Python function. Output only the code.
+      tools: []
+    - name: reviewer
+      model: ""
+      instructions: |
+        You are a reviewer. Point out one concrete issue. Output 1-2 sentences.
+      tools: []
+  delegations:
+    - { from: planner, to: coder }
+    - { from: coder, to: reviewer }
+  # Which gen_ai.agent.* attributes to emit per run (needs otel.endpoint set). Omit = all.
+  #   observability:
+  #     otel:
+  #       attributes: ["*"]      # all (default) | ["none"] = no telemetry | ["gen_ai.agent.id", ...]
+
+# Hardened by default (the image is non-root, uid 10001).
+securityContext:
+  pod:
+    runAsNonRoot: true
+    runAsUser: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  container:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+
+resources:
+  requests: { cpu: 50m, memory: 128Mi }
+  limits: { cpu: "1", memory: 512Mi }

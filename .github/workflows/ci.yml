@@ -1,0 +1,57 @@
+name: ci
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[all]"          # operator+interceptor+graph+dev — exercise the real runtime
+      - run: ruff check src tests
+      # Runtime deps are installed, so no test may skip for a missing import.
+      # -ra shows skip reasons; the guard step below fails the build on any skip.
+      - run: pytest --cov=driftwatch -ra | tee /tmp/pytest.out
+      - name: No unexpected skips (NFR-7)
+        run: |
+          if grep -qE "[1-9][0-9]* skipped" /tmp/pytest.out; then
+            echo "::error::tests were skipped with .[all] installed — runtime surface not exercised"
+            grep -E "skipped|SKIPPED" /tmp/pytest.out || true
+            exit 1
+          fi
+
+  chart:
+    # TC-F-27: the Helm chart must lint and render in every mode. Catches a partial
+    # template/values change (e.g. a PVC template referencing a values key that isn't
+    # there) before it ships.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: helm lint
+        run: helm lint deploy/helm/driftwatch
+      - name: render — default (no PVC, cluster RBAC, emptyDir)
+        run: helm template dw deploy/helm/driftwatch -f deploy/helm/driftwatch/values-k3d.yaml
+      - name: render — persistence + namespace-scoped RBAC (NFR-10 / R10b)
+        run: |
+          helm template dw deploy/helm/driftwatch \
+            --set persistence.enabled=true \
+            --set rbac.namespaced=true
+      - name: render — MCP proxy enabled (E7 path B)
+        run: |
+          helm template dw deploy/helm/driftwatch \
+            --set persistence.enabled=true \
+            --set mcpProxy.enabled=true \
+            --set mcpProxy.upstreamMcp=http://toolserver.kagent:8000/mcp
+      - name: render — MCP proxy guard fails without upstream (must error)
+        run: |
+          if helm template dw deploy/helm/driftwatch \
+               --set persistence.enabled=true --set mcpProxy.enabled=true >/dev/null 2>&1; then
+            echo "::error::mcpProxy.enabled without upstreamMcp should have failed to render"
+            exit 1
+          fi

@@ -1,0 +1,54 @@
+# AgentGate Helm — LIVE values: real LLM (Ollama) + dynamic delegation gate.
+# Verified in-cluster on k3d (qwen3.5 via the host's Ollama). Use as a -f override:
+#
+#   helm install agentgate deploy/helm/agentgate -n agentgate --create-namespace \
+#     -f examples/e13-orchestration-as-code/values-live.yaml
+#   # then:
+#   kubectl -n agentgate port-forward svc/agentgate-agentgate 8088:8000 &
+#   curl -s -X POST localhost:8088/run -d '{"goal":"is 17 prime?"}' | jq
+#
+# Default chart values.yaml runs STUB mode (no model) — this file turns it live.
+
+# dynamic=true: the orchestrator picks the next agent at run time and check_delegation gates each
+# hand-off against the declared graph (novel-edge / cycle / scope-escalation → recorded + blocked).
+# Set false for the static graph (creation-driven: edges fixed, undeclared hand-off impossible).
+dynamic: true
+
+# Telemetry → the OTel Collector (compose stack: `make -C examples/k3d-cluster-demo obs-up`).
+# host.k3d.internal:4317 reaches it from inside k3d (localhost:4317 on the host). Traces land in
+# Jaeger (:16686), metrics in Prometheus/Grafana (:3000). Empty = just the /run trace, no telemetry.
+otel:
+  endpoint: "host.k3d.internal:4317"
+
+# The agents' LLM. AgentGate is provider-agnostic; this wires Ollama. host.k3d.internal reaches the
+# host's Ollama from inside k3d (k3d injects it automatically — no host-alias needed). For a cloud
+# provider, swap the provider/host (and mount the API key from a Secret, never inline).
+env:
+  - { name: AGENTGATE_LLM_PROVIDER, value: ollama }
+  - { name: AGENTGATE_OLLAMA_HOST, value: "http://host.k3d.internal:11434" }
+  - { name: AGENTGATE_LLM_TIMEOUT, value: "600" }   # cloud models can cold-start slowly
+
+# The agent org as code (rendered into the ConfigMap mounted at /etc/agentgate/org.yaml).
+# Replace the model id with whatever your Ollama serves (e.g. qwen3.5:9b for a faster local run).
+org:
+  agents:
+    - name: planner
+      tier: strategic
+      model: qwen3.5:397b-cloud
+      instructions: |
+        You are a planner. Break the goal into 3 short numbered steps. Output only the steps.
+      tools: []
+    - name: coder
+      model: qwen3.5:397b-cloud
+      instructions: |
+        You are a coder. If the step needs arithmetic, ALWAYS use the calculator tool for the exact
+        result. Then implement step 1 as a short Python function. Output only the code.
+      tools: [calculator]
+    - name: reviewer
+      model: qwen3.5:397b-cloud
+      instructions: |
+        You are a reviewer. Point out exactly one concrete issue. Output 1-2 sentences.
+      tools: []
+  delegations:
+    - { from: planner, to: coder }
+    - { from: coder, to: reviewer }

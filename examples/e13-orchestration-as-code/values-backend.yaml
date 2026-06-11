@@ -1,0 +1,31 @@
+# AgentGate Helm — backend binding demo: agent bound to a WHOLE MCP backend (the DriftWatch proxy).
+# The ops agent declares only the backend (mcpServers: [k8s]) — it gets ALL of that backend's tools;
+# the LLM selects, DriftWatch (the proxy) governs. AgentGate names the backend, the backend handles
+# tool selection/governance.
+#   helm upgrade agentgate ../../deploy/helm/agentgate -n agentgate -f values-backend.yaml
+dynamic: false
+
+otel:
+  endpoint: "host.k3d.internal:4317"
+
+env:
+  - { name: AGENTGATE_LLM_TIMEOUT, value: "600" }
+
+org:
+  llm:
+    provider: ollama
+    model: qwen3.5:397b-cloud
+    endpoint: http://host.k3d.internal:11434
+  mcpServers:
+    # the DriftWatch chain-aware proxy (governed). Cross-namespace: agentgate ns → driftwatch ns.
+    # namespace: false → proxy is already namespaced (k8s_pods_list); keep names verbatim (no k8s_k8s_).
+    - { name: k8s, url: http://driftwatch-mcp.driftwatch.svc.cluster.local:8000/mcp, namespace: false }
+  agents:
+    - name: ops
+      mcpServers: [k8s]          # whole-backend binding — ops gets ALL of k8s's tools, governed
+      instructions: |
+        You are a Kubernetes operator. Use the available tools to answer the goal.
+        Call the tool that lists namespaces, then state what you found in one sentence.
+  # single agent, no delegation — MUST override the chart default (planner→coder→reviewer), else
+  # Helm deep-merge keeps it and build_contract fails ("delegation from unknown agent 'planner'").
+  delegations: []

@@ -1,0 +1,35 @@
+# AgentGate Helm — configurable LLM demo: global spec.llm + per-agent override, NO env.
+# Proves the brain axis works from config alone (provider/endpoint come from spec.llm, not env):
+#   global  → qwen3.5:397b-cloud   (planner, reviewer)
+#   override→ qwen3.5:cloud        (coder)
+#   helm upgrade agentgate ../../deploy/helm/agentgate -n agentgate -f values-llm.yaml
+dynamic: false
+
+otel:
+  endpoint: "host.k3d.internal:4317"
+
+# provider/endpoint come from org.llm below (NOT env). Only the timeout knob is set here, since cloud
+# models cold-start slowly — it doesn't affect which model/provider/endpoint is chosen.
+env:
+  - { name: AGENTGATE_LLM_TIMEOUT, value: "600" }
+
+org:
+  llm:                                   # global default for every agent
+    provider: ollama
+    model: qwen3.5:397b-cloud
+    endpoint: http://host.k3d.internal:11434
+  agents:
+    - name: planner
+      tier: strategic
+      instructions: |
+        Break the goal into 3 short numbered steps. Output only the steps.
+    - name: coder
+      llm: { model: qwen3.5:cloud }      # override just the model (provider/endpoint from global)
+      instructions: |
+        Implement step 1 as a short Python function. Output only the code.
+    - name: reviewer
+      instructions: |
+        Point out exactly one concrete issue. Output 1-2 sentences.
+  delegations:
+    - { from: planner, to: coder }
+    - { from: coder, to: reviewer }

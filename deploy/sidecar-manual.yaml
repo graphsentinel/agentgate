@@ -1,0 +1,67 @@
+# Manual interceptor-sidecar injection — the supported path in v1alpha1 (the mutating
+# webhook injector is off by default). Add the driftwatch-interceptor container to your
+# agent pod spec so its tool calls are scored before they leave the pod.
+#
+# This is a fragment, not a turnkey manifest: paste the driftwatch-interceptor container
+# into your Deployment's spec.template.spec.containers, and point your agent's tool path
+# at it (MCP_PROXY_URL=http://localhost:8080/v1/tool-call).
+#
+# NOTE: real Kagent is Helm-installed and controller-managed (it is not a hand-authored
+# Deployment, and the agent image is not set here). For that path DriftWatch intercepts
+# at the MCP tool-call hop — see examples/k3d-cluster-demo/README.md
+# "Running against real Kagent / Goose (path B)". This fragment fits a BYO agent image.
+#
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: your-agent            # <- your agent Deployment
+  namespace: driftwatch
+  labels: { app: your-agent }
+spec:
+  template:
+    spec:
+      containers:
+        # --- your agent container (BYO image) ---
+        - name: agent
+          image: PLACEHOLDER-agent-image      # <- your agent image (real Kagent uses Helm, not this)
+          env:
+            # point the agent's tool path at the interceptor
+            - name: MCP_PROXY_URL
+              value: "http://localhost:8080/v1/tool-call"
+        # --- DriftWatch interceptor sidecar (paste this into your pod) ---
+        - name: driftwatch-interceptor
+          image: ghcr.io/graphsentinel/driftwatch:0.1.0a0
+          command: ["driftwatch-interceptor"]
+          ports:
+            - { name: intercept, containerPort: 8080 }
+          env:
+            - name: DRIFTWATCH_OTLP_ENDPOINT
+              value: "host.k3d.internal:4317"
+            # Control->data-plane handoff (FR-10): the sidecar enforces the operator-
+            # reconciled policy + baseline. The operator writes the baseline snapshot to
+            # the shared data dir; these knobs deliver the reconciled policy.
+            - name: DRIFTWATCH_DATA_DIR
+              value: "/data"                  # operator-written baseline snapshot
+            - name: DRIFTWATCH_ACTION
+              value: "block"                  # log | drop | block (match the policy)
+            - name: DRIFTWATCH_THRESHOLD
+              value: "3.0"
+            - name: DRIFTWATCH_FAILURE_POLICY
+              value: "failClosed"             # failOpen | failClosed
+            - name: DRIFTWATCH_FEATURES
+              value: "tool,scope,sequence,argSchemaHash"
+          volumeMounts:
+            - name: driftwatch-baseline
+              mountPath: /data
+              readOnly: true                  # sidecar reads; the operator owns writes
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits:   { cpu: 100m, memory: 128Mi }
+      volumes:
+        # Share the operator-written baseline into the sidecar. In v1alpha1 wire this to
+        # the same store the operator persists (e.g. a shared PVC, NFR-10); an emptyDir
+        # here only yields a cold-start (empty) baseline until that store is mounted.
+        - name: driftwatch-baseline
+          emptyDir: {}

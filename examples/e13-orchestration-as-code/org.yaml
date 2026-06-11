@@ -1,0 +1,33 @@
+# E13 — the whole agent org as code. One file → a runnable single-pod multi-agent app.
+#   driftwatch generate examples/e13-orchestration-as-code/org.yaml          # → LangGraph source
+#   AGENTGATE_LLM_PROVIDER=ollama agentgate run org.yaml --goal "reverse a string"
+apiVersion: driftwatch.graphsentinel.org/v1alpha1
+kind: AgenticArchitecture
+metadata:
+  name: dev-org
+  namespace: agents
+spec:
+  agents:
+    - name: planner
+      tier: strategic
+      model: qwen3.5:397b-cloud
+      instructions: |
+        You are a planner. Break the goal into 3 short numbered steps.
+        Output only the numbered steps, nothing else.
+      tools: [search]
+    - name: coder
+      model: qwen3.5:397b-cloud
+      instructions: |
+        You are a coder. Given the plan, implement step 1 as a short Python function.
+        Output only the code block.
+      tools: [write_file, run_tests]
+    - name: reviewer
+      model: qwen3.5:397b-cloud
+      instructions: |
+        You are a reviewer. Point out exactly one concrete issue or improvement in the code.
+        Output 1-2 sentences.
+      tools: [read_file]
+  delegations:
+    - { from: planner, to: coder }
+    - { from: coder, to: reviewer }
+  # creation-driven: reviewer has no outgoing edge, so it can never delegate back (no loop generated)

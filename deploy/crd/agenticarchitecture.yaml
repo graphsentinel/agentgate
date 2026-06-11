@@ -1,0 +1,171 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: agenticarchitectures.driftwatch.graphsentinel.org
+spec:
+  group: driftwatch.graphsentinel.org
+  scope: Namespaced
+  names:
+    kind: AgenticArchitecture
+    plural: agenticarchitectures
+    singular: agenticarchitecture
+    shortNames: [aa]
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - { name: Agents, type: integer, jsonPath: .status.agents }
+        - { name: Reconciled, type: boolean, jsonPath: .status.reconciled }
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              # The configure/declare layer (E11): the agent organization as code. The operator
+              # reconciles this into a declared contract the engine scores actual behavior against
+              # (declared violation = unbound tool / out-of-scope), alongside the statistical
+              # baseline. Mirrors the ASL four-tier hierarchy, keeping only what the engine needs.
+              required: [agents]
+              properties:
+                tools:
+                  type: array
+                  description: shared tool catalogue — declared once, bound per-agent
+                  items:
+                    type: object
+                    required: [name]
+                    properties:
+                      name: { type: string }                 # tool id as the engine sees it
+                      category: { type: string }             # gen_ai.agent.tool.category
+                      risk: { type: integer, minimum: 0, maximum: 4, default: 0 }
+                agents:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [name]
+                    properties:
+                      name: { type: string }
+                      tier: { type: string, enum: [strategic, tactical, execution] }
+                      clearance:
+                        type: string
+                        enum: [low_public, internal_restricted, confidential, top_secret]
+                      reasoning: { type: string, enum: [llm, deterministic] }
+                      tools:
+                        type: array
+                        description: bound tools (least-privilege); empty = unconstrained
+                        items: { type: string }
+                      scope:
+                        type: array
+                        description: allowed resource scope boundary; empty = unconstrained
+                        items: { type: string }
+                      canDelegateTo:
+                        type: array
+                        description: declared delegation edges (E13 scores these)
+                        items: { type: string }
+                      reportsTo: { type: string }            # hierarchy edge (E13)
+                      # E13 generation fields — opaque to the declared-check; carried for codegen
+                      # (YAML → LangGraph/AutoGen/CrewAI app). See Docs/e13-mabac-delegation-design.md.
+                      role: { type: string }                 # one-line human summary
+                      model: { type: string }                # LLM id (shorthand for llm.model)
+                      instructions: { type: string }         # the agent's prompt body (inline)
+                      llm:                                    # per-agent LLM override (else spec.llm/env)
+                        type: object
+                        properties:
+                          provider: { type: string }
+                          model: { type: string }
+                          endpoint: { type: string }
+                      instructionsFrom:                       # source the prompt from config not inline
+                        type: object
+                        properties:
+                          path: { type: string }
+                          configMapKeyRef:
+                            type: object
+                            properties:
+                              name: { type: string }
+                              key: { type: string }
+                      mcpServers:                             # whole-backend binding (by name).
+                        type: array                           # string = all tools (default), OR
+                        items:                                # {name, allow, deny} for least-privilege
+                          oneOf:
+                            - type: string
+                            - type: object
+                              required: [name]
+                              properties:
+                                name: { type: string }
+                                allow: { type: array, items: { type: string } }   # globs over tools
+                                deny: { type: array, items: { type: string } }
+                delegations:
+                  type: array
+                  description: >-
+                    E13 edge-list form of the delegation graph (sugar; folds into each source
+                    agent's canDelegateTo). Declare the DAG here or inline per agent.
+                  items:
+                    type: object
+                    required: [from, to]
+                    properties:
+                      from: { type: string }
+                      to: { type: string }
+                topology: { type: string, enum: [pyramid, mesh] }
+                llm:                                          # global LLM default (agents override)
+                  type: object
+                  properties:
+                    provider: { type: string }
+                    model: { type: string }
+                    endpoint: { type: string }
+                mcpServers:
+                  type: array
+                  description: >-
+                    E13 — external MCP tool sources. Each {name, url} is connected at startup; its
+                    tools are imported namespaced <name>_<tool>. url may target the MCP server
+                    directly or the DriftWatch chain-aware proxy (governance is the url choice).
+                    Set namespace=false to keep the server's own tool names verbatim (passthrough —
+                    for a proxy that is already namespaced, avoids double-prefixing).
+                  items:
+                    type: object
+                    required: [name, url]
+                    properties:
+                      name: { type: string }
+                      url: { type: string }
+                      namespace: { type: boolean }      # default true; false = passthrough (proxy)
+                      governed: { type: boolean }        # behind DriftWatch proxy → cross-check _meta
+                                                         # may be sent; default = (not namespace)
+                observability:
+                  type: object
+                  description: E13 §4b — telemetry emission control (the OTLP endpoint is a deploy env)
+                  properties:
+                    otel:
+                      type: object
+                      properties:
+                        attributes:
+                          type: array
+                          description: >-
+                            which gen_ai.agent.* attributes to emit per agent run.
+                            ["none"] = emit nothing; ["*"] or absent = all; else only the listed keys.
+                          items: { type: string }
+                rules:
+                  type: array
+                  description: >-
+                    E12 declared chain-rules — forbidden contiguous tool orderings (known-bad).
+                    A rule fires when the chain's most recent calls end with `deny` in order.
+                  items:
+                    type: object
+                    required: [deny]
+                    properties:
+                      deny:
+                        type: array
+                        minItems: 1
+                        items: { type: string }      # tool ids (cross-server: <server>_<tool>)
+                      reason: { type: string }
+                      agent: { type: string }        # optional: scope the rule to one agent
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+              properties:
+                reconciled: { type: boolean }
+                agents: { type: integer }
+                contractHash: { type: string }

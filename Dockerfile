@@ -1,6 +1,5 @@
 # AgentGate — declare → generate → run a multi-agent app as a service (E13).
-# Same codebase as DriftWatch, but built with the `codegen` extra and the agentgate-server entry.
-# DriftWatch (drift core) ships from the root Dockerfile; AgentGate (orchestration as code) from here.
+# Standalone repo: orchestration-as-code. DriftWatch (governance) ships from its own repo.
 FROM python:3.12-slim AS build
 WORKDIR /src
 COPY pyproject.toml README.md ./
@@ -12,10 +11,10 @@ LABEL org.opencontainers.image.source="https://github.com/graphsentinel/agentgat
 LABEL org.opencontainers.image.description="AgentGate — declare an agent org as code, generate + run + govern it (E13)"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 
-# interceptor → FastAPI/uvicorn (the /run server); codegen → langgraph/langchain (the generated app);
-# operator/mcp kept so the one image can also reconcile/proxy if needed. Entry chosen at runtime.
+# server → FastAPI/uvicorn (the /run service); codegen → langgraph/langchain (the generated app);
+# mcp → fastmcp (external MCP tool binding).
 COPY --from=build /dist/*.whl /tmp/
-RUN pip install --no-cache-dir "$(echo /tmp/*.whl)[interceptor,codegen,operator,mcp]" && rm -rf /tmp/*.whl
+RUN pip install --no-cache-dir "$(echo /tmp/*.whl)[server,codegen,mcp]" && rm -rf /tmp/*.whl
 
 RUN useradd -u 10001 -m agentgate
 USER 10001

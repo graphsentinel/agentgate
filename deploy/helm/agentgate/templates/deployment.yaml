@@ -29,10 +29,11 @@ spec:
           securityContext:
             {{- toYaml .Values.securityContext.container | nindent 12 }}
           ports:
-            - { name: http, containerPort: 8000 }
+            - { name: http, containerPort: {{ .Values.service.port }} }
           env:
             - { name: AGENTGATE_SPEC_PATH, value: /etc/agentgate/org.yaml }
             - { name: AGENTGATE_DYNAMIC, value: {{ .Values.dynamic | quote }} }
+            - { name: AGENTGATE_PORT, value: {{ .Values.service.port | quote }} }   # run() binds here
             {{- if .Values.otel.endpoint }}
             - { name: AGENTGATE_OTLP_ENDPOINT, value: {{ .Values.otel.endpoint | quote }} }
             {{- end }}

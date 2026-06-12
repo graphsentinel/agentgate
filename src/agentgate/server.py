@@ -114,10 +114,15 @@ def _load_contract(spec_path: str) -> DeclaredContract:
 
 
 def run() -> None:  # pragma: no cover - console entry point
-    """Entry point: read the mounted AgenticArchitecture, serve it on :8000."""
+    """Entry point: read the mounted AgenticArchitecture, serve it (AGENTGATE_PORT, default 8000)."""
     import uvicorn
 
     spec_path = os.environ.get("AGENTGATE_SPEC_PATH", "/etc/agentgate/org.yaml")
     dynamic = os.environ.get("AGENTGATE_DYNAMIC", "").lower() in ("1", "true", "yes")
     contract = _load_contract(spec_path)
-    uvicorn.run(build_app(contract, dynamic=dynamic), host="0.0.0.0", port=8000)
+    host = os.environ.get("AGENTGATE_HOST", "0.0.0.0")
+    try:
+        port = int(os.environ.get("AGENTGATE_PORT", "8000"))
+    except ValueError:
+        port = 8000
+    uvicorn.run(build_app(contract, dynamic=dynamic), host=host, port=port)

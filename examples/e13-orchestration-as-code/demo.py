@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import sys
 
-from driftwatch.codegen import coordinator, generate_langgraph
-from driftwatch.library.contract import build_contract
+from agentgate.codegen import coordinator, generate_langgraph
+from agentgate.library.contract import build_contract
 
 MODEL = "qwen3.5:397b-cloud"
 

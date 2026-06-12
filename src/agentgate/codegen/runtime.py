@@ -184,10 +184,14 @@ def _maybe_llm(
         return _anthropic_chat(model=model, instructions=instructions, state=state, name=name,
                                tool_names=tools, tool_trace=tool_trace, endpoint=endpoint,
                                api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+    if provider == "gemini":
+        return _gemini_chat(model=model, instructions=instructions, state=state, name=name,
+                            tool_names=tools, tool_trace=tool_trace, endpoint=endpoint,
+                            api_key=os.environ.get("GEMINI_API_KEY", ""))
     raise ValueError(
         f"unknown LLM provider {provider!r} "
-        f"(supported: ollama, openai-compatible[openai/azure/runpod/vllm/tgi], anthropic; "
-        f"gemini/bedrock roadmap)")
+        f"(supported: ollama, openai-compatible[openai/azure/runpod/vllm/tgi], anthropic, gemini; "
+        f"bedrock roadmap)")
 
 
 def _ollama_chat(
@@ -388,4 +392,70 @@ def _anthropic_chat(
             results.append({"type": "tool_result", "tool_use_id": tu.get("id", ""),
                             "content": str(result)})
         messages.append({"role": "user", "content": results})
+    return last_text
+
+
+def _gemini_chat(
+    *, model: str, instructions: str, state: dict, name: str, tool_names: tuple[str, ...] = (),
+    tool_trace: list[dict] | None = None, endpoint: str = "", api_key: str = "",
+) -> str:
+    """A chat turn (with a tool loop) against Gemini's generateContent API.
+
+    Gemini's format: tools are {functionDeclarations:[{name,description,parameters}]}; calls arrive as
+    `functionCall` parts; results go back as `functionResponse` parts. Same creation-driven binding.
+    """
+    import httpx
+
+    from .tools import bound_tools, get_tool
+
+    base = (endpoint or "https://generativelanguage.googleapis.com").rstrip("/")
+    timeout = float(_env("LLM_TIMEOUT", "180"))
+    max_iters = int(_env("TOOL_ITERS", "4"))
+    allowed = set(tool_names)
+    fdecls = [{"name": t.name, "description": t.description, "parameters": t.parameters}
+              for t in bound_tools(tool_names)]
+
+    goal = state.get("goal", "")
+    prior = "\n".join(
+        f"- {h['agent']}: {h['output']}" for h in state.get("history", []) if h.get("output")
+    )
+    user = f"Goal: {goal}\n\nWork so far:\n{prior}" if prior else f"Goal: {goal}"
+    contents: list[dict] = [{"role": "user", "parts": [{"text": user}]}]
+    url = f"{base}/v1beta/models/{model}:generateContent?key={api_key}"
+
+    last_text = ""
+    for _ in range(max_iters):
+        payload: dict = {"contents": contents}
+        if instructions:
+            payload["systemInstruction"] = {"parts": [{"text": instructions}]}
+        if fdecls:
+            payload["tools"] = [{"functionDeclarations": fdecls}]
+        resp = httpx.post(url, json=payload, timeout=timeout)
+        resp.raise_for_status()
+        cand = ((resp.json().get("candidates") or [{}])[0] or {})
+        parts = (cand.get("content", {}) or {}).get("parts") or []
+        text = "".join(p.get("text", "") for p in parts if "text" in p)
+        last_text = text or last_text
+        fcalls = [p["functionCall"] for p in parts if "functionCall" in p]
+        if not fcalls:
+            return text
+        contents.append({"role": "model", "parts": parts})
+        responses: list[dict] = []
+        for fc in fcalls:
+            tname = fc.get("name", "")
+            targs = fc.get("args") or {}
+            tool = get_tool(tname)
+            bound = tname in allowed and tool is not None
+            if not bound:
+                result = f"error: tool {tname!r} is not bound to agent {name!r}"
+            else:
+                try:
+                    result = tool.func(**targs) if isinstance(targs, dict) else tool.func(targs)
+                except Exception as e:  # noqa: BLE001 — surface tool errors to the model
+                    result = f"error: {e}"
+            if tool_trace is not None:
+                tool_trace.append({"tool": tname, "ok": bound})
+            responses.append({"functionResponse": {"name": tname,
+                                                    "response": {"result": str(result)}}})
+        contents.append({"role": "user", "parts": responses})
     return last_text

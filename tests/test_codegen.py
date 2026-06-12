@@ -881,3 +881,24 @@ def test_maybe_llm_anthropic(monkeypatch):
     assert out == "done"
     assert captured["url"] == "https://api.anthropic.com/v1/messages"
     assert captured["headers"]["x-api-key"] == "sk-ant"
+
+
+def test_maybe_llm_gemini(monkeypatch):
+    # gemini generateContent (?key=...); functionDeclarations format, basic chat returns parts[].text
+    from agentgate.codegen.runtime import _maybe_llm
+    captured = {}
+
+    class _R:
+        def raise_for_status(self): pass
+        def json(self): return {"candidates": [{"content": {"parts": [{"text": "done"}]}}]}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        captured["url"] = url
+        return _R()
+
+    monkeypatch.setattr("httpx.post", fake_post)
+    monkeypatch.setenv("GEMINI_API_KEY", "g-key")
+    out = _maybe_llm(name="a", model="gemini-2.0", instructions="i", state={"goal": "g"},
+                     tools=(), provider="gemini")
+    assert out == "done"
+    assert "generateContent?key=g-key" in captured["url"]

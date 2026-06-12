@@ -286,13 +286,34 @@ scope-widening hand-off and watch it get recorded/blocked in `violations`.
 
 ---
 
+## Reaching a host / remote LLM from the cluster (CoreDNS)
+
+For **Ollama** the agents call `http://host.k3d.internal:11434`. In-cluster pods reach a host-local
+*or* remote Ollama by that **stable name** — no hardcoded IP in any manifest. Register it once
+(idempotent CoreDNS `NodeHosts` patch + CoreDNS restart):
+
+```bash
+# local Ollama on the k3d host (default) — discovers the host gateway from the node route
+./examples/e13-orchestration-as-code/register-host-alias.sh driftwatch-demo
+
+# remote Ollama by IP or DNS name (aliased to host.k3d.internal)
+OLLAMA_HOST=10.0.0.42            ./examples/e13-orchestration-as-code/register-host-alias.sh
+OLLAMA_HOST=ollama.corp.example  ./examples/e13-orchestration-as-code/register-host-alias.sh
+```
+
+Then `spec.llm.endpoint: http://host.k3d.internal:11434` resolves from every pod. **Cloud providers**
+(openai-compatible / RunPod / anthropic / gemini / bedrock) use their public endpoints — no alias
+needed; only host-local Ollama does.
+
+---
+
 ## Documentation
 
 | Doc | What |
 |---|---|
 | [`Docs/e13-mabac-delegation-design.md`](Docs/e13-mabac-delegation-design.md) | The full design: declare → generate → execute → govern, the two modes, the runtime gate. |
 | [`Docs/publishing-agentgate-ghcr.md`](Docs/publishing-agentgate-ghcr.md) | Maintainer: build + push the image and chart to GHCR (public). |
-| [`examples/e13-orchestration-as-code/`](examples/e13-orchestration-as-code/) | The demo org, tool example, live Helm values, and standalone script. |
+| [`examples/e13-orchestration-as-code/`](examples/e13-orchestration-as-code/) | The demo org, tool example, live Helm values, and the `register-host-alias.sh` CoreDNS script. |
 | [`deploy/helm/agentgate/`](deploy/helm/agentgate/) | The Helm chart (values, deployment, service, configmap). |
 
 Apache-2.0.

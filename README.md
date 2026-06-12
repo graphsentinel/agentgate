@@ -117,6 +117,15 @@ rules:                             # forbidden orderings (optional)
 Both also record a per-run trace: which tools each agent called (and any refused), surfaced in the
 `/run` response and the CLI output.
 
+**Central DriftWatch (many apps).** With `govern.proxyType: driftwatch`, this app pushes its contract
+once and routes its tool calls through DriftWatch. Several AgentGate apps can share **one** DriftWatch:
+each sends an **app id** — set `app:` (Helm; defaults to the release name) — as both the push `ref` and
+the `_meta.app` on every call, so DriftWatch governs each app against its own contract.
+
+> The app id **must** be stable and unique per app: DriftWatch blocks a call whose `_meta.app` matches
+> no registered contract (`unknown_app`). So if a push hasn't landed yet (DriftWatch was down at
+> startup), that app's calls are blocked until it re-pushes — governance is fail-safe, not silent.
+
 ---
 
 ## Quick start (local, no cluster)

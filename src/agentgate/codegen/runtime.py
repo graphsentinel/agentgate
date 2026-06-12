@@ -188,10 +188,12 @@ def _maybe_llm(
         return _gemini_chat(model=model, instructions=instructions, state=state, name=name,
                             tool_names=tools, tool_trace=tool_trace, endpoint=endpoint,
                             api_key=os.environ.get("GEMINI_API_KEY", ""))
+    if provider == "bedrock":
+        return _bedrock_chat(model=model, instructions=instructions, state=state, name=name,
+                             tool_names=tools, tool_trace=tool_trace)
     raise ValueError(
-        f"unknown LLM provider {provider!r} "
-        f"(supported: ollama, openai-compatible[openai/azure/runpod/vllm/tgi], anthropic, gemini; "
-        f"bedrock roadmap)")
+        f"unknown LLM provider {provider!r} (supported: ollama, "
+        f"openai-compatible[openai/azure/runpod/vllm/tgi], anthropic, gemini, bedrock)")
 
 
 def _ollama_chat(
@@ -458,4 +460,73 @@ def _gemini_chat(
             responses.append({"functionResponse": {"name": tname,
                                                     "response": {"result": str(result)}}})
         contents.append({"role": "user", "parts": responses})
+    return last_text
+
+
+def _bedrock_chat(
+    *, model: str, instructions: str, state: dict, name: str, tool_names: tuple[str, ...] = (),
+    tool_trace: list[dict] | None = None,
+) -> str:
+    """A chat turn (with a tool loop) against AWS Bedrock's Converse API (boto3).
+
+    Bedrock is not OpenAI-compatible and needs the AWS SDK (pip install agentgate[bedrock]) + AWS
+    credentials (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION). `model` is the Bedrock
+    modelId. Converse tool format: toolConfig.tools[].toolSpec; calls as `toolUse`, results as
+    `toolResult`. Same creation-driven binding.
+    """
+    try:
+        import boto3
+    except ImportError as e:
+        raise ValueError("bedrock provider needs boto3 — pip install agentgate[bedrock]") from e
+
+    from .tools import bound_tools, get_tool
+
+    region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1"
+    client = boto3.client("bedrock-runtime", region_name=region)
+    max_iters = int(_env("TOOL_ITERS", "4"))
+    allowed = set(tool_names)
+    tool_specs = [{"toolSpec": {"name": t.name, "description": t.description or t.name,
+                                "inputSchema": {"json": t.parameters}}}
+                  for t in bound_tools(tool_names)]
+
+    goal = state.get("goal", "")
+    prior = "\n".join(
+        f"- {h['agent']}: {h['output']}" for h in state.get("history", []) if h.get("output")
+    )
+    user = f"Goal: {goal}\n\nWork so far:\n{prior}" if prior else f"Goal: {goal}"
+    messages: list[dict] = [{"role": "user", "content": [{"text": user}]}]
+
+    last_text = ""
+    for _ in range(max_iters):
+        kw: dict = {"modelId": model, "messages": messages}
+        if instructions:
+            kw["system"] = [{"text": instructions}]
+        if tool_specs:
+            kw["toolConfig"] = {"tools": tool_specs}
+        out = (client.converse(**kw).get("output", {}) or {}).get("message", {}) or {}
+        content = out.get("content") or []
+        text = "".join(b.get("text", "") for b in content if "text" in b)
+        last_text = text or last_text
+        tool_uses = [b["toolUse"] for b in content if "toolUse" in b]
+        if not tool_uses:
+            return text
+        messages.append(out)
+        results: list[dict] = []
+        for tu in tool_uses:
+            tname = tu.get("name", "")
+            targs = tu.get("input") or {}
+            tool = get_tool(tname)
+            bound = tname in allowed and tool is not None
+            if not bound:
+                result = f"error: tool {tname!r} is not bound to agent {name!r}"
+            else:
+                try:
+                    result = tool.func(**targs) if isinstance(targs, dict) else tool.func(targs)
+                except Exception as e:  # noqa: BLE001 — surface tool errors to the model
+                    result = f"error: {e}"
+            if tool_trace is not None:
+                tool_trace.append({"tool": tname, "ok": bound})
+            results.append({"toolResult": {"toolUseId": tu.get("toolUseId", ""),
+                                           "content": [{"text": str(result)}]}})
+        messages.append({"role": "user", "content": results})
     return last_text

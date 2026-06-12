@@ -902,3 +902,21 @@ def test_maybe_llm_gemini(monkeypatch):
                      tools=(), provider="gemini")
     assert out == "done"
     assert "generateContent?key=g-key" in captured["url"]
+
+
+def test_maybe_llm_bedrock(monkeypatch):
+    # bedrock = AWS SDK (boto3) Converse API — not openai-compatible; mock the client
+    import sys
+    import types
+    fake = types.ModuleType("boto3")
+
+    class _Client:
+        def converse(self, **kw):
+            return {"output": {"message": {"content": [{"text": "done"}]}}}
+
+    fake.client = lambda *a, **k: _Client()
+    monkeypatch.setitem(sys.modules, "boto3", fake)
+    from agentgate.codegen.runtime import _maybe_llm
+    out = _maybe_llm(name="a", model="anthropic.claude-3", instructions="i", state={"goal": "g"},
+                     tools=(), provider="bedrock")
+    assert out == "done"

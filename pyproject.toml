@@ -23,8 +23,10 @@ server = ["fastapi>=0.110.0", "uvicorn>=0.29.0"]
 codegen = ["langgraph>=0.2.0", "langchain>=0.3.0"]
 # External MCP tool binding (spec.mcpServers) — FastMCP client.
 mcp = ["fastmcp>=3.3.1"]
+# bedrock LLM provider (the only non-httpx one — AWS SDK). openai/anthropic/gemini/ollama use httpx.
+bedrock = ["boto3>=1.34.0"]
 dev = ["pytest>=8.0.0", "pytest-cov>=5.0.0", "pytest-timeout>=2.3.0", "ruff>=0.4.0", "mypy>=1.10.0", "pyyaml>=6.0", "httpx>=0.27.0"]
-all = ["agentgate[server,codegen,mcp,dev]"]
+all = ["agentgate[server,codegen,mcp,bedrock,dev]"]
 
 [project.scripts]
 agentgate = "agentgate.cli:main"                         # E13 generate/run

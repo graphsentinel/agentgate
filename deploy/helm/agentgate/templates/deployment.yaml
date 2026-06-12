@@ -34,6 +34,8 @@ spec:
             - { name: AGENTGATE_SPEC_PATH, value: /etc/agentgate/org.yaml }
             - { name: AGENTGATE_DYNAMIC, value: {{ .Values.dynamic | quote }} }
             - { name: AGENTGATE_PORT, value: {{ .Values.service.port | quote }} }   # run() binds here
+            # multi-app id: ref for the contract push + _meta.app routing key (central DriftWatch).
+            - { name: AGENTGATE_APP, value: {{ .Values.app | default .Release.Name | quote }} }
             {{- if .Values.otel.endpoint }}
             - { name: AGENTGATE_OTLP_ENDPOINT, value: {{ .Values.otel.endpoint | quote }} }
             {{- end }}

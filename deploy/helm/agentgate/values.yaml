@@ -5,6 +5,12 @@ image:
 
 replicaCount: 1
 
+# App id for a CENTRAL DriftWatch fronting many AgentGates (multi-app). It is the `ref` this app
+# pushes its contract under AND the `_meta.app` stamped on every tool call, so DriftWatch routes each
+# call to the right declared contract — N AgentGates → one DriftWatch without overwriting each other.
+# Empty → the release name is used. Irrelevant when govern.proxyType=none (standalone).
+app: ""
+
 # false = static graph (creation-driven: edges fixed, undeclared hand-off impossible).
 # true  = dynamic graph (observability-driven: the orchestrator picks the next agent at run time
 #         and check_delegation gates it against the declared graph).

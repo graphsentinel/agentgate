@@ -83,8 +83,13 @@ def make_agent_node(
         # one MCP session for this agent-run so the proxy groups the tool calls into one chain;
         # meta carries the prompt/agent/task_type (agent-side of the §4c prompt-aware cross-check)
         goal = str(state.get("goal", ""))
-        # candidates (tools) let DriftWatch's cross-check predict from the agent's actual tool set
+        # candidates (tools) let DriftWatch's cross-check predict from the agent's actual tool set.
+        # `app` (this app's id) routes the call to the right declared contract in a CENTRAL DriftWatch
+        # that fronts many AgentGates (multi-app) — the same id this app pushed its contract under.
         run_meta = {"agent": name, "task_type": goal[:80], "prompt": goal, "tools": list(eff_tools)}
+        app_id = _env("APP")
+        if app_id:
+            run_meta["app"] = app_id
         with McpSession(meta=run_meta):
             output = _maybe_llm(name=name, model=model, instructions=eff_instructions, state=state,
                                 tools=eff_tools, tool_trace=tool_trace,

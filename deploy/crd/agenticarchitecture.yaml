@@ -124,10 +124,14 @@ spec:
                     `register` (DriftWatch stores it, source=agentgate — no separate kubectl apply)
                     and routes the agents' tool calls through `endpoint` (the DriftWatch MCP proxy),
                     so every call is governed. One source of truth (this org); DriftWatch is fed by push.
+                    `app` (multi-app) is this app's id under a CENTRAL DriftWatch fronting many AgentGates:
+                    the contract push `ref` and the `_meta.app` routing key. Empty → AGENTGATE_APP env
+                    (chart: release name), so each app's calls hit its own contract without overwrite.
                   properties:
                     proxyType: { type: string }               # none | driftwatch
                     endpoint: { type: string }                # governed tool path (DriftWatch MCP proxy URL)
                     register: { type: string }                # one-time contract push URL (DriftWatch)
+                    app: { type: string }                     # multi-app id (ref + _meta.app); else AGENTGATE_APP
                 llm:                                          # global LLM default (agents override)
                   type: object
                   description: >-

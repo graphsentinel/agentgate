@@ -26,11 +26,24 @@ def _maybe_govern(contract: DeclaredContract, register_mcp_tools, *, strict: boo
     if (gov.get("proxyType") or "none").lower() != "driftwatch":
         return
     register = gov.get("register")
+    # Multi-app (central DriftWatch, N AgentGates): each app pushes under its own `ref` so they
+    # coexist in DriftWatch's registry without overwriting. The ref is the app id — the SAME value
+    # the runtime stamps into each tool call's `_meta.app` for routing (AGENTGATE_APP env, set by the
+    # chart from `.Values.app`; `govern.app`/`govern.ref` in the CR overrides). Empty → DriftWatch
+    # defaults to "agentgate" (single-app back-compat).
+    app_ref = (gov.get("app") or gov.get("ref")
+               or os.environ.get("AGENTGATE_APP") or "")
+    if app_ref:
+        # single source of the app id: the runtime stamps this SAME value into every tool call's
+        # `_meta.app` (it reads AGENTGATE_APP), so the push ref and the routing key always agree.
+        os.environ["AGENTGATE_APP"] = app_ref
     if register:
         try:
             import httpx
-            httpx.post(register, json={"source": "agentgate", "contract": contract.to_dict()},
-                       timeout=15.0).raise_for_status()
+            body = {"source": "agentgate", "contract": contract.to_dict()}
+            if app_ref:
+                body["ref"] = app_ref
+            httpx.post(register, json=body, timeout=15.0).raise_for_status()
         except Exception as e:  # noqa: BLE001 — DriftWatch unreachable
             if strict:
                 raise

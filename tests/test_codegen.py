@@ -954,3 +954,88 @@ def test_maybe_govern_noop_when_none(monkeypatch):
     c = build_contract({"agents": [{"name": "a"}]})              # no govern → standalone
     _maybe_govern(c, lambda *a, **k: called.append("reg"))
     assert called == []
+
+
+# --- multi-app: central DriftWatch, N AgentGates (per-app ref + _meta.app routing) ---
+
+def _capture_session_meta(monkeypatch):
+    """Replace McpSession with a stub that records the meta the node opens it with."""
+    import agentgate.codegen.tools as tools
+    captured = {}
+
+    class _FakeSession:
+        def __init__(self, meta=None):
+            captured["meta"] = meta
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(tools, "McpSession", _FakeSession)
+    return captured
+
+
+def test_run_meta_stamps_app_for_routing(monkeypatch):
+    # AGENTGATE_APP set → every tool call's _meta carries app (the central-DriftWatch routing key)
+    captured = _capture_session_meta(monkeypatch)
+    monkeypatch.setenv("AGENTGATE_APP", "checkout-app")
+    make_agent_node(name="planner", model="", instructions="i", tools=["calculator"])(
+        {"goal": "do x", "history": []})
+    assert captured["meta"]["app"] == "checkout-app"
+    assert captured["meta"]["agent"] == "planner"
+
+
+def test_run_meta_omits_app_when_unset(monkeypatch):
+    # No app id → no app key (single-app/standalone back-compat; routing falls back to default)
+    captured = _capture_session_meta(monkeypatch)
+    monkeypatch.delenv("AGENTGATE_APP", raising=False)
+    monkeypatch.delenv("DRIFTWATCH_APP", raising=False)
+    make_agent_node(name="planner", model="", instructions="i", tools=["calculator"])(
+        {"goal": "do x", "history": []})
+    assert "app" not in captured["meta"]
+
+
+def _govern_post_capture(monkeypatch):
+    posted = {}
+
+    class _R:
+        def raise_for_status(self):
+            pass
+
+    def fake_post(url, json=None, timeout=None):
+        posted["url"] = url
+        posted["json"] = json
+        return _R()
+
+    monkeypatch.setattr("httpx.post", fake_post)
+    return posted
+
+
+def test_maybe_govern_sends_app_ref_from_env(monkeypatch):
+    # central DriftWatch: the push carries ref=<app id> so apps coexist without overwrite
+    from agentgate.server import _maybe_govern
+    posted = _govern_post_capture(monkeypatch)
+    monkeypatch.setenv("AGENTGATE_APP", "checkout-app")
+    c = build_contract({"agents": [{"name": "a"}], "govern": {
+        "proxyType": "driftwatch", "endpoint": "http://dw:8000/mcp",
+        "register": "http://dw:8080/contracts"}})
+    _maybe_govern(c, lambda *a, **k: None)
+    assert posted["json"]["ref"] == "checkout-app"
+
+
+def test_maybe_govern_govern_app_overrides_env_and_exports(monkeypatch):
+    # govern.app (CR) wins over AGENTGATE_APP AND is exported to env so the runtime stamps the SAME
+    # value into _meta.app — push ref and routing key always agree.
+    import os
+
+    from agentgate.server import _maybe_govern
+    posted = _govern_post_capture(monkeypatch)
+    monkeypatch.setenv("AGENTGATE_APP", "stale")
+    c = build_contract({"agents": [{"name": "a"}], "govern": {
+        "proxyType": "driftwatch", "endpoint": "http://dw:8000/mcp",
+        "register": "http://dw:8080/contracts", "app": "billing-app"}})
+    _maybe_govern(c, lambda *a, **k: None)
+    assert posted["json"]["ref"] == "billing-app"
+    assert os.environ["AGENTGATE_APP"] == "billing-app"

@@ -164,13 +164,25 @@ def _maybe_llm(
 
     Provider/endpoint resolution: per-agent/global value (passed in) ?? env (the floor).
     """
-    provider = provider or _env("LLM_PROVIDER")
+    provider = (provider or _env("LLM_PROVIDER")).lower()
     if not provider or not model:
         return None
     if provider == "ollama":
         return _ollama_chat(model=model, instructions=instructions, state=state, name=name,
                             tool_names=tools, tool_trace=tool_trace, endpoint=endpoint)
-    raise ValueError(f"unknown LLM provider {provider!r} (supported: ollama)")
+    # OpenAI-compatible: openai, azure, runpod, vllm, tgi, or any serverless /v1 endpoint. The
+    # `endpoint` is the base_url (e.g. https://api.runpod.ai/v2/<id>/openai/v1); the key comes from
+    # <PROVIDER>_API_KEY (falling back to OPENAI_API_KEY). No plaintext key in the CRD.
+    if provider in ("openai", "azure", "runpod", "vllm", "tgi", "openai-compatible"):
+        # API keys use their standard names (OPENAI_API_KEY, RUNPOD_API_KEY, …) — NOT the AGENTGATE_/
+        # DRIFTWATCH_ prefix; read os.environ directly (key never lives in the CRD).
+        key = (os.environ.get(f"{provider.upper().replace('-', '_')}_API_KEY")
+               or os.environ.get("OPENAI_API_KEY", ""))
+        return _openai_chat(model=model, instructions=instructions, state=state, name=name,
+                            tool_names=tools, tool_trace=tool_trace, endpoint=endpoint, api_key=key)
+    raise ValueError(
+        f"unknown LLM provider {provider!r} "
+        f"(supported: ollama, openai-compatible[openai/azure/runpod/vllm/tgi])")
 
 
 def _ollama_chat(
@@ -234,3 +246,73 @@ def _ollama_chat(
                 tool_trace.append({"tool": tname, "ok": bound})
             messages.append({"role": "tool", "tool_name": tname, "content": str(result)})
     return last_content   # tool loop exhausted; return the model's last words
+
+
+def _openai_chat(
+    *, model: str, instructions: str, state: dict, name: str, tool_names: tuple[str, ...] = (),
+    tool_trace: list[dict] | None = None, endpoint: str = "", api_key: str = "",
+) -> str:
+    """A chat turn (with a tool loop) against an OpenAI-compatible /v1/chat/completions endpoint.
+
+    Covers OpenAI, Azure OpenAI, RunPod serverless (vLLM/TGI), and any compatible server — `endpoint`
+    is the base_url, `api_key` the bearer token. Same creation-driven binding as Ollama: the model is
+    offered only its bound tools; an unbound call is refused.
+    """
+    import json
+
+    import httpx
+
+    from .tools import bound_tools, get_tool
+
+    base = (endpoint or _env("OPENAI_BASE_URL", "https://api.openai.com/v1")).rstrip("/")
+    timeout = float(_env("LLM_TIMEOUT", "180"))
+    max_iters = int(_env("TOOL_ITERS", "4"))
+    allowed = set(tool_names)
+    schema = [t.as_ollama_schema() for t in bound_tools(tool_names)]   # OpenAI tool schema (same shape)
+
+    goal = state.get("goal", "")
+    prior = "\n".join(
+        f"- {h['agent']}: {h['output']}" for h in state.get("history", []) if h.get("output")
+    )
+    user = f"Goal: {goal}\n\nWork so far:\n{prior}" if prior else f"Goal: {goal}"
+    messages: list[dict] = [
+        {"role": "system", "content": instructions or f"You are the {name} agent."},
+        {"role": "user", "content": user},
+    ]
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+
+    last_content = ""
+    for _ in range(max_iters):
+        payload: dict = {"model": model, "messages": messages, "stream": False}
+        if schema:
+            payload["tools"] = schema
+        resp = httpx.post(f"{base}/chat/completions", json=payload, headers=headers, timeout=timeout)
+        resp.raise_for_status()
+        msg = ((resp.json().get("choices") or [{}])[0] or {}).get("message", {}) or {}
+        last_content = msg.get("content") or last_content
+        calls = msg.get("tool_calls") or []
+        if not calls:
+            return msg.get("content", "") or ""
+        messages.append(msg)   # assistant turn carrying the tool_calls
+        for tc in calls:
+            fn = tc.get("function") or {}
+            tname = fn.get("name", "")
+            raw_args = fn.get("arguments")
+            try:
+                targs = json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or {})
+            except Exception:  # noqa: BLE001 — malformed args → empty, tool will error cleanly
+                targs = {}
+            tool = get_tool(tname)
+            bound = tname in allowed and tool is not None
+            if not bound:
+                result = f"error: tool {tname!r} is not bound to agent {name!r}"
+            else:
+                try:
+                    result = tool.func(**targs) if isinstance(targs, dict) else tool.func(targs)
+                except Exception as e:  # noqa: BLE001 — surface tool errors to the model
+                    result = f"error: {e}"
+            if tool_trace is not None:
+                tool_trace.append({"tool": tname, "ok": bound})
+            messages.append({"role": "tool", "tool_call_id": tc.get("id", ""),
+                             "content": str(result)})
+    return last_content

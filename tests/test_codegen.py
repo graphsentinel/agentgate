@@ -822,3 +822,39 @@ def test_make_router_quarantines_undeclared_next():
     assert r({"next": "coder"}) == "coder"          # declared target → route
     assert r({"next": "reviewer"}) == "__end__"     # undeclared pick → quarantine to END
     assert r({"next": None}) == "__end__"           # dropped → END
+
+
+# --- multi-provider LLM: openai-compatible (OpenAI / Azure / RunPod / vLLM) ---
+
+def test_maybe_llm_openai_compatible_runpod(monkeypatch):
+    # provider=openai (or runpod/azure/vllm) → /v1/chat/completions with a bearer key; RunPod is just
+    # an endpoint (base_url). No plaintext key in config — it comes from <PROVIDER>_API_KEY.
+    from agentgate.codegen.runtime import _maybe_llm
+    captured: dict = {}
+
+    class _R:
+        def raise_for_status(self): pass
+        def json(self): return {"choices": [{"message": {"content": "done", "tool_calls": []}}]}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        captured["url"] = url
+        captured["headers"] = headers or {}
+        return _R()
+
+    monkeypatch.setattr("httpx.post", fake_post)
+    monkeypatch.setenv("RUNPOD_API_KEY", "rp-secret")
+    out = _maybe_llm(name="ops", model="llama-3.1-70b", instructions="i", state={"goal": "g"},
+                     tools=(), provider="runpod",
+                     endpoint="https://api.runpod.ai/v2/abc123/openai/v1")
+    assert out == "done"
+    assert captured["url"] == "https://api.runpod.ai/v2/abc123/openai/v1/chat/completions"
+    assert captured["headers"]["Authorization"] == "Bearer rp-secret"
+
+
+def test_maybe_llm_unknown_provider_lists_supported(monkeypatch):
+    from agentgate.codegen.runtime import _maybe_llm
+    monkeypatch.delenv("AGENTGATE_LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("DRIFTWATCH_LLM_PROVIDER", raising=False)
+    with pytest.raises(ValueError, match="openai-compatible"):
+        _maybe_llm(name="a", model="m", instructions="i", state={"goal": "g"}, tools=(),
+                   provider="cohere")

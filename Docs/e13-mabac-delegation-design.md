@@ -562,6 +562,42 @@ LLM'e hiç sunulmaz).
 Kalan (tasarım kararı): `_meta` collision şu an **refuse + net mesaj** (overwrite engelli); hard-fail
 yerine refuse (LLM halüsinasyonu run'ı düşürmesin).
 
+## 4e. Govern: `proxyType` — single-source AgentGate ↔ DriftWatch interop
+
+**Problem (chicken-and-egg).** Without this, the same `AgenticArchitecture` is declared twice: once
+to AgentGate (to generate) and again to DriftWatch (to govern). Two sources, drift risk.
+
+**Design.** One field on the org makes AgentGate the **single source**; DriftWatch is fed by **push**,
+never re-declared:
+
+```yaml
+spec:
+  govern:
+    proxyType: driftwatch        # none (default) | driftwatch
+    endpoint:  http://driftwatch-mcp.driftwatch.svc:8000/mcp   # governed tool path (MCP proxy)
+    register:  http://driftwatch-interceptor.driftwatch.svc:8080/contracts  # one-time contract push
+  agents: [...]
+```
+
+- **`proxyType: none`** (default / empty): AgentGate runs standalone — tools go direct, no governance.
+  Nothing is sent to DriftWatch. (Back-compat: existing orgs are `none`.)
+- **`proxyType: driftwatch`**: AgentGate, at server startup, does two things:
+  1. **Push the contract once** — `build_contract(org).to_dict()` → `POST {register}` (idempotent;
+     DriftWatch stores it as the declared contract, `source=agentgate`). The operator-`kubectl apply`
+     of an `AgenticArchitecture` CR becomes unnecessary — AgentGate registers it.
+  2. **Route the tool path** — agents' MCP tool calls go to `endpoint` (the DriftWatch proxy), so
+     every call is governed (declared + baseline + cross-check). Equivalent to setting
+     `spec.mcpServers` at the proxy, but implied by `proxyType`.
+
+**Why it's clean.** Single declaration (AgentGate); push not pull (AgentGate emits, DriftWatch
+receives); opt-in (`proxyType` is the one knob — `none`=standalone, `driftwatch`=governed). No code
+dependency — `none` never touches DriftWatch; `driftwatch` is HTTP push + a proxy URL (protocol only).
+
+**Split of work.** AgentGate: `govern.proxyType` field + startup push + tool-path routing.
+DriftWatch: a contract **register endpoint** (`POST /contracts {contract}` → declared store, tagged
+`source=agentgate`). Roadmap order: (a) design + CRD [this], (b) AgentGate push + routing, (c)
+DriftWatch register endpoint.
+
 ## 5. CRD / config
 
 No new top-level CRD — the delegation graph is already in `AgenticArchitecture` (E11). E13 adds:

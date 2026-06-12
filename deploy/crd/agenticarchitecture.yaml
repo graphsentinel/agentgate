@@ -116,6 +116,18 @@ spec:
                       from: { type: string }
                       to: { type: string }
                 topology: { type: string, enum: [pyramid, mesh] }
+                govern:                                       # E13 §4e — single-source interop
+                  type: object
+                  description: >-
+                    proxyType none (default) → AgentGate standalone, tools direct, no governance.
+                    proxyType driftwatch → at startup AgentGate pushes the declared contract once to
+                    `register` (DriftWatch stores it, source=agentgate — no separate kubectl apply)
+                    and routes the agents' tool calls through `endpoint` (the DriftWatch MCP proxy),
+                    so every call is governed. One source of truth (this org); DriftWatch is fed by push.
+                  properties:
+                    proxyType: { type: string }               # none | driftwatch
+                    endpoint: { type: string }                # governed tool path (DriftWatch MCP proxy URL)
+                    register: { type: string }                # one-time contract push URL (DriftWatch)
                 llm:                                          # global LLM default (agents override)
                   type: object
                   description: >-

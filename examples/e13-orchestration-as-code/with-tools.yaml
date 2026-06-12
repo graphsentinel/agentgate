@@ -1,7 +1,7 @@
 # E13 tool binding — an agent that actually calls a tool (the `calculator` ships in codegen/tools.py).
 #   AGENTGATE_LLM_PROVIDER=ollama agentgate run with-tools.yaml --goal "What is 17 * 23?"
 # Creation-driven binding: the model is offered ONLY this agent's bound tools; a call to anything
-# else is refused at run time. Register your own with @register_tool in driftwatch.codegen.tools.
+# else is refused at run time. Register your own with @register_tool in agentgate.codegen.tools.
 spec:
   agents:
     - name: mathematician

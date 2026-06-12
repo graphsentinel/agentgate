@@ -439,3 +439,19 @@ def test_govern_empty_byte_stable():
     c = build_contract({"agents": [{"name": "a"}]})
     assert c.govern == {}
     assert "govern" not in c.to_dict()
+
+
+def test_govern_driftwatch_auto_binds_every_agent():
+    # consultant MAJOR #1 — proxyType=driftwatch must AUTO-BIND agents to the driftwatch backend,
+    # not just register it. Every agent gets ("driftwatch", (), ()) alongside any explicit backend.
+    c = build_contract({
+        "agents": [{"name": "a"}, {"name": "b", "mcpServers": ["k8s"]}],
+        "govern": {"proxyType": "driftwatch", "endpoint": "http://dw/mcp"}})
+    assert ("driftwatch", (), ()) in c.agents["a"].mcp_backends
+    assert ("driftwatch", (), ()) in c.agents["b"].mcp_backends    # added next to k8s
+    assert any(b[0] == "k8s" for b in c.agents["b"].mcp_backends)
+
+
+def test_govern_none_does_not_auto_bind():
+    c = build_contract({"agents": [{"name": "a"}]})                # no govern → standalone
+    assert c.agents["a"].mcp_backends == ()

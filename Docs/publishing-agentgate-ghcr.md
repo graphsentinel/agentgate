@@ -1,9 +1,9 @@
 # Publishing AgentGate to GHCR (public)
 
-AgentGate ships **separately** from DriftWatch — same codebase, different build (`Dockerfile.agentgate`)
-and entrypoint (`agentgate-server`). DriftWatch is the drift-detection core (KubeCon); AgentGate is
-orchestration-as-code: declare an agent org → generate → run → govern (E13). For the DriftWatch
-image/chart see [`publishing-ghcr.md`](publishing-ghcr.md).
+AgentGate is a **standalone repo** — orchestration-as-code: declare an agent org → generate → run →
+govern (E13). This publishes the AgentGate image (`Dockerfile`, entrypoint `agentgate-server`) and its
+Helm chart to GHCR. DriftWatch (the governance/drift product) is a separate repo with its own
+publishing doc — the two share only the `AgenticArchitecture` format + telemetry/`_meta` protocols.
 
 Two artifacts, one registry (`ghcr.io`, owner = **graphsentinel**):
 
@@ -43,12 +43,12 @@ export GHCR_PAT=ghp_xxxxxxxxxxxx
 ```bash
 echo "$GHCR_PAT" | podman login ghcr.io -u graphsentinel --password-stdin
 
-podman build -f Dockerfile.agentgate -t ghcr.io/graphsentinel/agentgate:0.1.0 .
+podman build -f Dockerfile -t ghcr.io/graphsentinel/agentgate:0.1.0 .
 podman push                          ghcr.io/graphsentinel/agentgate:0.1.0
 ```
 
-> The root `Dockerfile` is DriftWatch; AgentGate is `Dockerfile.agentgate` (built with the `codegen`
-> extra so the generated LangGraph app can run, and `ENTRYPOINT agentgate-server`, port 8000).
+> `Dockerfile` builds with the `codegen` extra (so the generated LangGraph app can run) and
+> `ENTRYPOINT agentgate-server`, port 8000.
 
 ### (optional) Smoke-test the image locally before pushing
 

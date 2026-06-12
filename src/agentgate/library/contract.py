@@ -415,10 +415,21 @@ def build_contract(spec: dict) -> DeclaredContract:
     # global LLM default (E13 §Configurable LLM) — agents override per field, env is the runtime floor
     g_llm = spec.get("llm") or {}
 
+    # E13 §4e — proxyType=driftwatch: AUTO-BIND every agent to the "driftwatch" backend so its tools
+    # are actually offered to the model (and governed via the proxy). Without this the backend is
+    # registered but no agent uses it. The server registers "driftwatch" from govern.endpoint.
+    gov = spec.get("govern") or {}
+    if (gov.get("proxyType") or "").lower() == "driftwatch":
+        agents = {
+            n: (a if any(b[0] == "driftwatch" for b in a.mcp_backends)
+                else replace(a, mcp_backends=a.mcp_backends + (("driftwatch", (), ()),)))
+            for n, a in agents.items()
+        }
+
     return DeclaredContract(agents=agents, risk_map=risk_map,
                             topology=spec.get("topology", "") or "", deny_sequences=deny_sequences,
                             emit_attributes=emit_attributes, mcp_servers=mcp_servers,
                             llm_provider=g_llm.get("provider", "") or "",
                             llm_model=g_llm.get("model", "") or "",
                             llm_endpoint=g_llm.get("endpoint", "") or "",
-                            govern=spec.get("govern") or {})
+                            govern=gov)

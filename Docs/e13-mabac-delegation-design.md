@@ -585,9 +585,10 @@ spec:
   1. **Push the contract once** — `build_contract(org).to_dict()` → `POST {register}` (idempotent;
      DriftWatch stores it as the declared contract, `source=agentgate`). The operator-`kubectl apply`
      of an `AgenticArchitecture` CR becomes unnecessary — AgentGate registers it.
-  2. **Route the tool path** — agents' MCP tool calls go to `endpoint` (the DriftWatch proxy), so
-     every call is governed (declared + baseline + cross-check). Equivalent to setting
-     `spec.mcpServers` at the proxy, but implied by `proxyType`.
+  2. **Route the tool path (auto-bind)** — `build_contract` adds the `driftwatch` backend to **every
+     agent's `mcp_backends`** (alongside any explicit ones), and the server registers that backend
+     from `endpoint` (the DriftWatch proxy). So each agent is *actually* offered the proxy's tools and
+     every call is governed — the binding is automatic, not just a registered-but-unused backend.
 
 **Why it's clean.** Single declaration (AgentGate); push not pull (AgentGate emits, DriftWatch
 receives); opt-in (`proxyType` is the one knob — `none`=standalone, `driftwatch`=governed). No code

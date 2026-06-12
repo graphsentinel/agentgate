@@ -31,9 +31,15 @@ def _maybe_govern(contract: DeclaredContract, register_mcp_tools, *, strict: boo
             import httpx
             httpx.post(register, json={"source": "agentgate", "contract": contract.to_dict()},
                        timeout=15.0).raise_for_status()
-        except Exception:  # noqa: BLE001 — DriftWatch unreachable
+        except Exception as e:  # noqa: BLE001 — DriftWatch unreachable
             if strict:
                 raise
+            # proxyType=driftwatch means the user EXPECTS governance — make a failed push loud, not
+            # silent, even when degrading (consultant): the tool path still routes to the proxy.
+            import logging
+            logging.getLogger("agentgate.govern").warning(
+                "contract push to DriftWatch (%s) failed: %s — agents will still route to the proxy, "
+                "but DriftWatch has no declared contract until the next successful push", register, e)
     endpoint = gov.get("endpoint")
     if endpoint:   # governed tool path: the DriftWatch proxy (already namespaced) as a governed backend
         register_mcp_tools("driftwatch", endpoint, namespace=False, governed=True, strict=strict)

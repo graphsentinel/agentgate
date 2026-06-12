@@ -920,3 +920,37 @@ def test_maybe_llm_bedrock(monkeypatch):
     out = _maybe_llm(name="a", model="anthropic.claude-3", instructions="i", state={"goal": "g"},
                      tools=(), provider="bedrock")
     assert out == "done"
+
+
+def test_maybe_govern_pushes_contract_and_registers_proxy(monkeypatch):
+    # E13 §4e — proxyType=driftwatch pushes the contract once + registers the proxy backend
+    from agentgate.server import _maybe_govern
+    posted = {}
+
+    class _R:
+        def raise_for_status(self): pass
+
+    def fake_post(url, json=None, timeout=None):
+        posted["url"] = url
+        posted["json"] = json
+        return _R()
+
+    monkeypatch.setattr("httpx.post", fake_post)
+    registered = []
+    c = build_contract({"agents": [{"name": "a"}], "govern": {
+        "proxyType": "driftwatch", "endpoint": "http://dw:8000/mcp",
+        "register": "http://dw:8080/contracts"}})
+    _maybe_govern(c, lambda *a, **k: registered.append(a))
+    assert posted["url"] == "http://dw:8080/contracts"
+    assert posted["json"]["source"] == "agentgate"
+    assert posted["json"]["contract"]["agents"]                 # the contract was pushed
+    assert registered and registered[0][1] == "http://dw:8000/mcp"   # proxy backend registered
+
+
+def test_maybe_govern_noop_when_none(monkeypatch):
+    from agentgate.server import _maybe_govern
+    called = []
+    monkeypatch.setattr("httpx.post", lambda *a, **k: called.append("post"))
+    c = build_contract({"agents": [{"name": "a"}]})              # no govern → standalone
+    _maybe_govern(c, lambda *a, **k: called.append("reg"))
+    assert called == []

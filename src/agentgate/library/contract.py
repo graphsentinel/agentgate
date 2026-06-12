@@ -113,6 +113,9 @@ class DeclaredContract:
     llm_provider: str = ""
     llm_model: str = ""
     llm_endpoint: str = ""
+    # E13 §4e govern: {proxyType: none|driftwatch, endpoint, register}. driftwatch → push the contract
+    # once + route tool calls through the DriftWatch proxy. Empty/none → standalone (no governance).
+    govern: dict = field(default_factory=dict)
 
     def effective_llm(self, agent_id: str) -> tuple[str, str, str]:
         """Resolve (provider, model, endpoint) for an agent: per-agent ?? global (env is the runtime
@@ -231,6 +234,7 @@ class DeclaredContract:
                                           ("model", self.llm_model),
                                           ("endpoint", self.llm_endpoint)) if v}}
                if (self.llm_provider or self.llm_model or self.llm_endpoint) else {}),
+            **({"govern": dict(self.govern)} if self.govern else {}),
         }
 
     @classmethod
@@ -270,6 +274,7 @@ class DeclaredContract:
             llm_provider=(d.get("llm", {}) or {}).get("provider", "") or "",
             llm_model=(d.get("llm", {}) or {}).get("model", "") or "",
             llm_endpoint=(d.get("llm", {}) or {}).get("endpoint", "") or "",
+            govern=d.get("govern", {}) or {},
         )
 
     @property
@@ -415,4 +420,5 @@ def build_contract(spec: dict) -> DeclaredContract:
                             emit_attributes=emit_attributes, mcp_servers=mcp_servers,
                             llm_provider=g_llm.get("provider", "") or "",
                             llm_model=g_llm.get("model", "") or "",
-                            llm_endpoint=g_llm.get("endpoint", "") or "")
+                            llm_endpoint=g_llm.get("endpoint", "") or "",
+                            govern=spec.get("govern") or {})

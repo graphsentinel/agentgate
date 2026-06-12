@@ -423,3 +423,19 @@ def test_check_delegation_strict_treats_unknown_as_violation():
     assert c.check_delegation("ghost", "b") is None             # non-strict: unknown src → unconstrained
     assert c.check_delegation("ghost", "b", strict=True)        # strict: unknown src → violation
     assert c.check_delegation("a", "ghost", strict=True)        # strict: unknown dst → violation
+
+
+def test_govern_proxytype_parsed_and_serialized():
+    spec = {"agents": [{"name": "a"}],
+            "govern": {"proxyType": "driftwatch", "endpoint": "http://dw:8000/mcp",
+                       "register": "http://dw:8080/contracts"}}
+    c = build_contract(spec)
+    assert c.govern["proxyType"] == "driftwatch"
+    c2 = DeclaredContract.from_dict(c.to_dict())
+    assert c2.govern == c.govern and c2.hash == c.hash
+
+
+def test_govern_empty_byte_stable():
+    c = build_contract({"agents": [{"name": "a"}]})
+    assert c.govern == {}
+    assert "govern" not in c.to_dict()

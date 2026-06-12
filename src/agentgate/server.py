@@ -12,6 +12,33 @@ import os
 from .library.contract import DeclaredContract, build_contract, resolve_instructions
 
 
+def _maybe_govern(contract: DeclaredContract, register_mcp_tools, *, strict: bool = False) -> None:
+    """E13 §4e — single-source interop. If `spec.govern.proxyType == driftwatch`:
+
+    1. **push the contract once** to `govern.register` (DriftWatch stores it as the declared contract,
+       source=agentgate) — so the org is declared only here, never re-applied to DriftWatch;
+    2. **route the tool path** — register `govern.endpoint` (the DriftWatch MCP proxy) as a governed
+       backend, so agents' tool calls flow through governance.
+
+    `proxyType` empty/none → no-op (standalone). Push failures degrade gracefully unless `strict`.
+    """
+    gov = contract.govern or {}
+    if (gov.get("proxyType") or "none").lower() != "driftwatch":
+        return
+    register = gov.get("register")
+    if register:
+        try:
+            import httpx
+            httpx.post(register, json={"source": "agentgate", "contract": contract.to_dict()},
+                       timeout=15.0).raise_for_status()
+        except Exception:  # noqa: BLE001 — DriftWatch unreachable
+            if strict:
+                raise
+    endpoint = gov.get("endpoint")
+    if endpoint:   # governed tool path: the DriftWatch proxy (already namespaced) as a governed backend
+        register_mcp_tools("driftwatch", endpoint, namespace=False, governed=True, strict=strict)
+
+
 def _compile_graph(contract: DeclaredContract, *, dynamic: bool):
     """Generate the LangGraph app for `contract` and return the compiled graph."""
     from .codegen import generate
@@ -35,6 +62,8 @@ def build_app(contract: DeclaredContract, *, dynamic: bool = False):  # pragma: 
               or "").strip().lower() == "true"
     for srv_name, srv_url, srv_ns, srv_gv in contract.mcp_servers:   # import external MCP tools
         register_mcp_tools(srv_name, srv_url, namespace=srv_ns, governed=srv_gv, strict=strict)
+    # E13 §4e — govern.proxyType=driftwatch: push the contract once + route tool calls via the proxy.
+    _maybe_govern(contract, register_mcp_tools, strict=strict)
     graph = _compile_graph(contract, dynamic=dynamic)
     entry = coordinator(contract)
     app = FastAPI(title="agentgate")

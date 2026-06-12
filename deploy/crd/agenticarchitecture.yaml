@@ -113,10 +113,16 @@ spec:
                 topology: { type: string, enum: [pyramid, mesh] }
                 llm:                                          # global LLM default (agents override)
                   type: object
+                  description: >-
+                    provider: ollama (native) | openai | azure | runpod | vllm | tgi
+                    (openai-compatible — endpoint is the /v1 base_url, e.g. RunPod
+                    https://api.runpod.ai/v2/<id>/openai/v1). The API key is NOT in the CR; it comes
+                    from the standard <PROVIDER>_API_KEY env (OPENAI_API_KEY / RUNPOD_API_KEY …) wired
+                    to the pod via a Secret. anthropic/gemini/bedrock are roadmap.
                   properties:
-                    provider: { type: string }
+                    provider: { type: string }                # ollama | openai | azure | runpod | vllm | tgi
                     model: { type: string }
-                    endpoint: { type: string }
+                    endpoint: { type: string }                # base_url (openai-compatible) / host (ollama)
                 mcpServers:
                   type: array
                   description: >-

@@ -858,3 +858,26 @@ def test_maybe_llm_unknown_provider_lists_supported(monkeypatch):
     with pytest.raises(ValueError, match="openai-compatible"):
         _maybe_llm(name="a", model="m", instructions="i", state={"goal": "g"}, tools=(),
                    provider="cohere")
+
+
+def test_maybe_llm_anthropic(monkeypatch):
+    # anthropic Messages API (/v1/messages, x-api-key); tool format differs but basic chat returns text
+    from agentgate.codegen.runtime import _maybe_llm
+    captured = {}
+
+    class _R:
+        def raise_for_status(self): pass
+        def json(self): return {"content": [{"type": "text", "text": "done"}]}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        captured["url"] = url
+        captured["headers"] = headers or {}
+        return _R()
+
+    monkeypatch.setattr("httpx.post", fake_post)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
+    out = _maybe_llm(name="a", model="claude-3-5", instructions="i", state={"goal": "g"},
+                     tools=(), provider="anthropic")
+    assert out == "done"
+    assert captured["url"] == "https://api.anthropic.com/v1/messages"
+    assert captured["headers"]["x-api-key"] == "sk-ant"

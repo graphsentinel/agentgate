@@ -180,9 +180,14 @@ def _maybe_llm(
                or os.environ.get("OPENAI_API_KEY", ""))
         return _openai_chat(model=model, instructions=instructions, state=state, name=name,
                             tool_names=tools, tool_trace=tool_trace, endpoint=endpoint, api_key=key)
+    if provider == "anthropic":
+        return _anthropic_chat(model=model, instructions=instructions, state=state, name=name,
+                               tool_names=tools, tool_trace=tool_trace, endpoint=endpoint,
+                               api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
     raise ValueError(
         f"unknown LLM provider {provider!r} "
-        f"(supported: ollama, openai-compatible[openai/azure/runpod/vllm/tgi])")
+        f"(supported: ollama, openai-compatible[openai/azure/runpod/vllm/tgi], anthropic; "
+        f"gemini/bedrock roadmap)")
 
 
 def _ollama_chat(
@@ -316,3 +321,71 @@ def _openai_chat(
             messages.append({"role": "tool", "tool_call_id": tc.get("id", ""),
                              "content": str(result)})
     return last_content
+
+
+def _anthropic_chat(
+    *, model: str, instructions: str, state: dict, name: str, tool_names: tuple[str, ...] = (),
+    tool_trace: list[dict] | None = None, endpoint: str = "", api_key: str = "",
+) -> str:
+    """A chat turn (with a tool loop) against Anthropic's Messages API (/v1/messages).
+
+    Anthropic's tool format differs from OpenAI's: tools are {name, description, input_schema};
+    tool calls arrive as `tool_use` content blocks; results go back as `tool_result` blocks. Same
+    creation-driven binding (only bound tools offered; unbound refused).
+    """
+    import httpx
+
+    from .tools import bound_tools, get_tool
+
+    base = (endpoint or "https://api.anthropic.com").rstrip("/")
+    timeout = float(_env("LLM_TIMEOUT", "180"))
+    max_iters = int(_env("TOOL_ITERS", "4"))
+    max_tokens = int(_env("MAX_TOKENS", "1024"))
+    allowed = set(tool_names)
+    tools_schema = [{"name": t.name, "description": t.description, "input_schema": t.parameters}
+                    for t in bound_tools(tool_names)]
+
+    goal = state.get("goal", "")
+    prior = "\n".join(
+        f"- {h['agent']}: {h['output']}" for h in state.get("history", []) if h.get("output")
+    )
+    user = f"Goal: {goal}\n\nWork so far:\n{prior}" if prior else f"Goal: {goal}"
+    messages: list[dict] = [{"role": "user", "content": user}]
+    headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01",
+               "content-type": "application/json"}
+
+    last_text = ""
+    for _ in range(max_iters):
+        payload: dict = {"model": model, "max_tokens": max_tokens, "messages": messages}
+        if instructions:
+            payload["system"] = instructions
+        if tools_schema:
+            payload["tools"] = tools_schema
+        resp = httpx.post(f"{base}/v1/messages", json=payload, headers=headers, timeout=timeout)
+        resp.raise_for_status()
+        content = resp.json().get("content") or []
+        text = "".join(b.get("text", "") for b in content if b.get("type") == "text")
+        last_text = text or last_text
+        tool_uses = [b for b in content if b.get("type") == "tool_use"]
+        if not tool_uses:
+            return text
+        messages.append({"role": "assistant", "content": content})
+        results: list[dict] = []
+        for tu in tool_uses:
+            tname = tu.get("name", "")
+            targs = tu.get("input") or {}
+            tool = get_tool(tname)
+            bound = tname in allowed and tool is not None
+            if not bound:
+                result = f"error: tool {tname!r} is not bound to agent {name!r}"
+            else:
+                try:
+                    result = tool.func(**targs) if isinstance(targs, dict) else tool.func(targs)
+                except Exception as e:  # noqa: BLE001 — surface tool errors to the model
+                    result = f"error: {e}"
+            if tool_trace is not None:
+                tool_trace.append({"tool": tname, "ok": bound})
+            results.append({"type": "tool_result", "tool_use_id": tu.get("id", ""),
+                            "content": str(result)})
+        messages.append({"role": "user", "content": results})
+    return last_text

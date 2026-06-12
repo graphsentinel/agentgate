@@ -26,6 +26,15 @@ otel:
 # With none set, agents run in deterministic stub mode (no model needed — proves wiring).
 env: []
 
+# LLM API key from a Kubernetes Secret (never plaintext). Maps to <PROVIDER>_API_KEY env, e.g.
+# OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY / RUNPOD_API_KEY. Leave name empty to skip
+# (Ollama needs no key). Mirrors spec.llm.apiKeySecretRef in the AgenticArchitecture CRD.
+llm:
+  apiKeySecretRef:
+    name: ""                          # Secret name (empty → no key env injected)
+    key: "apiKey"                     # data key inside the Secret
+    envName: "OPENAI_API_KEY"         # env to expose (set per provider)
+
 # The agent org AS CODE — rendered into a ConfigMap and mounted at /etc/agentgate/org.yaml.
 # This IS the AgenticArchitecture (bare ASL form). Edit here, `helm upgrade`, and the org changes.
 org:

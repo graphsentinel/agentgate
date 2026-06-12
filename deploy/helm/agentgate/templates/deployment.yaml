@@ -36,6 +36,15 @@ spec:
             {{- if .Values.otel.endpoint }}
             - { name: AGENTGATE_OTLP_ENDPOINT, value: {{ .Values.otel.endpoint | quote }} }
             {{- end }}
+            {{- with .Values.llm.apiKeySecretRef }}
+            {{- if .name }}
+            - name: {{ .envName | default "OPENAI_API_KEY" }}    {{/* LLM key from a Secret */}}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .name }}
+                  key: {{ .key | default "apiKey" }}
+            {{- end }}
+            {{- end }}
             {{- with .Values.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

@@ -79,6 +79,11 @@ spec:
                           provider: { type: string }
                           model: { type: string }
                           endpoint: { type: string }
+                          apiKeySecretRef:                      # API key from a Secret (not plaintext)
+                            type: object                        # → mounted as <PROVIDER>_API_KEY env
+                            properties:
+                              name: { type: string }            # Secret name
+                              key: { type: string }             # Secret data key
                       instructionsFrom:                       # source the prompt from config not inline
                         type: object
                         properties:
@@ -125,6 +130,11 @@ spec:
                     provider: { type: string }                # ollama|openai|azure|runpod|vllm|tgi|anthropic|gemini|bedrock
                     model: { type: string }
                     endpoint: { type: string }                # base_url (openai-compatible) / host (ollama)
+                    apiKeySecretRef:                          # API key from a Secret (not plaintext)
+                      type: object                            # → mounted as <PROVIDER>_API_KEY env
+                      properties:
+                        name: { type: string }                # Secret name
+                        key: { type: string }                 # Secret data key
                 mcpServers:
                   type: array
                   description: >-

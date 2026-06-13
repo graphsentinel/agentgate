@@ -166,8 +166,8 @@ curl -s -X POST localhost:8088/run -H 'content-type: application/json' \
 That installs stub mode (no model — proves the wiring). To go live, see configuration below.
 
 > The image (`ghcr.io/graphsentinel/agentgate`) and chart (`oci://ghcr.io/graphsentinel/charts/agentgate`)
-> are public — anyone can install without access to this repo. Maintainer publish flow →
-> [`Docs/publishing-agentgate-ghcr.md`](Docs/publishing-agentgate-ghcr.md).
+> are public — anyone can install without access to this repo. (Maintainer publish flow is kept in the
+> internal design docs.)
 
 ---
 
@@ -320,8 +320,9 @@ needed; only host-local Ollama does.
 
 | Doc | What |
 |---|---|
-| [`Docs/e13-mabac-delegation-design.md`](Docs/e13-mabac-delegation-design.md) | The full design: declare → generate → execute → govern, the two modes, the runtime gate. |
-| [`Docs/publishing-agentgate-ghcr.md`](Docs/publishing-agentgate-ghcr.md) | Maintainer: build + push the image and chart to GHCR (public). |
+| [`Docs/User Manuals/Installation.md`](Docs/User%20Manuals/Installation.md) | Install every way: CLI, container, Helm; verify; go live with an LLM; govern via DriftWatch. |
+| [`Docs/User Manuals/Configuration.md`](Docs/User%20Manuals/Configuration.md) | Full reference: Helm values, env vars, the AgenticArchitecture spec, LLM providers, governance. |
+| [`Docs/User Manuals/Troubleshooting.md`](Docs/User%20Manuals/Troubleshooting.md) | Concepts + concrete fixes (ports, stub vs live, LLM keys, MCP backends, governance). |
 | [`examples/e13-orchestration-as-code/`](examples/e13-orchestration-as-code/) | The demo org, tool example, live Helm values, and the `register-host-alias.sh` CoreDNS script. |
 | [`deploy/helm/agentgate/`](deploy/helm/agentgate/) | The Helm chart (values, deployment, service, configmap). |
 

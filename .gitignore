@@ -30,3 +30,6 @@ examples/k3d-cluster-demo/data/*
 .idea/
 .vscode/
 VISION.md
+
+# Internal design docs — kept local, not published. User-facing docs live in "Docs/User Manuals/".
+Docs/design/
